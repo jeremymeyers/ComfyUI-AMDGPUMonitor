@@ -124,7 +124,7 @@ const createMonitorElement = () => {
     
     const vramText = document.createElement("div");
     vramText.className = "amd-vram-text";
-    vramText.textContent = "0MB / 0MB (0%)";
+    vramText.textContent = "0%";
     vramText.style.position = "absolute";
     vramText.style.top = "0";
     vramText.style.left = "5px";
@@ -173,108 +173,112 @@ const createMonitorElement = () => {
     tempSection.appendChild(tempBarContainer);
     content.appendChild(tempSection);
     
-    // Add event listener for collapsing
-    let isCollapsed = false;
+    // CPU Utilization section
+    const cpuSection = document.createElement("div");
+    cpuSection.style.marginBottom = "8px";
+
+    const cpuLabel = document.createElement("div");
+    cpuLabel.textContent = "CPU Utilization:";
+    cpuLabel.style.marginBottom = "2px";
+
+    const cpuBarContainer = document.createElement("div");
+    cpuBarContainer.style.height = "15px";
+    cpuBarContainer.style.backgroundColor = "#333";
+    cpuBarContainer.style.borderRadius = "3px";
+    cpuBarContainer.style.position = "relative";
+
+    const cpuBar = document.createElement("div");
+    cpuBar.className = "amd-cpu-utilization-bar";
+    cpuBar.style.height = "100%";
+    cpuBar.style.width = "0%";
+    cpuBar.style.backgroundColor = "#47a0ff";
+    cpuBar.style.borderRadius = "3px";
+    cpuBar.style.transition = "width 0.5s ease-out, background-color 0.3s";
+
+    const cpuText = document.createElement("div");
+    cpuText.className = "amd-cpu-utilization-text";
+    cpuText.textContent = "0%";
+    cpuText.style.position = "absolute";
+    cpuText.style.top = "0";
+    cpuText.style.left = "5px";
+    cpuText.style.lineHeight = "15px";
+    cpuText.style.textShadow = "1px 1px 1px #000";
+
+    cpuBarContainer.appendChild(cpuBar);
+    cpuBarContainer.appendChild(cpuText);
+    cpuSection.appendChild(cpuLabel);
+    cpuSection.appendChild(cpuBarContainer);
+    content.appendChild(cpuSection);
+
+    // RAM Usage section (display in % and MB)
+    const ramSection = document.createElement("div");
+    ramSection.style.marginBottom = "8px";
+
+    const ramLabel = document.createElement("div");
+    ramLabel.textContent = "RAM Usage:";
+    ramLabel.style.marginBottom = "2px";
+
+    const ramBarContainer = document.createElement("div");
+    ramBarContainer.style.height = "15px";
+    ramBarContainer.style.backgroundColor = "#333";
+    ramBarContainer.style.borderRadius = "3px";
+    ramBarContainer.style.position = "relative";
+
+    const ramBar = document.createElement("div");
+    ramBar.className = "amd-ram-bar";
+    ramBar.style.height = "100%";
+    ramBar.style.width = "0%";
+    ramBar.style.backgroundColor = "#47a0ff";
+    ramBar.style.borderRadius = "3px";
+    ramBar.style.transition = "width 0.5s ease-out, background-color 0.3s";
+
+    const ramText = document.createElement("div");
+    ramText.className = "amd-ram-text";
+    ramText.textContent = "0%";
+    ramText.style.position = "absolute";
+    ramText.style.top = "0";
+    ramText.style.left = "5px";
+    ramText.style.lineHeight = "15px";
+    ramText.style.textShadow = "1px 1px 1px #000";
+
+    ramBarContainer.appendChild(ramBar);
+    ramBarContainer.appendChild(ramText);
+    ramSection.appendChild(ramLabel);
+    ramSection.appendChild(ramBarContainer);
+    content.appendChild(ramSection);
+
+    // Collapse/close behavior
     collapseButton.addEventListener("click", () => {
-        if (isCollapsed) {
-            content.style.display = "block";
+        if (content.style.display === "none") {
+            content.style.display = "";
             collapseButton.innerHTML = "−";
-            isCollapsed = false;
         } else {
             content.style.display = "none";
             collapseButton.innerHTML = "+";
-            isCollapsed = true;
         }
     });
-    
-    // Add event listener for closing
+
     closeButton.addEventListener("click", () => {
         container.style.display = "none";
-        // Store the closed state in localStorage
-        localStorage.setItem("amd-gpu-monitor-closed", "true");
+        localStorage.setItem("amd-gpu-monitor-closed", "1");
     });
-    
-    // Make the monitor draggable
-    let isDragging = false;
-    let dragOffsetX, dragOffsetY;
-    
-    title.addEventListener("mousedown", (e) => {
-        // Only handle main button (left button)
-        if (e.button !== 0) return;
-        
-        isDragging = true;
-        dragOffsetX = e.clientX - container.offsetLeft;
-        dragOffsetY = e.clientY - container.offsetTop;
-        
-        // Prevent text selection during drag
-        e.preventDefault();
-    });
-    
-    document.addEventListener("mousemove", (e) => {
-        if (!isDragging) return;
-        
-        const x = e.clientX - dragOffsetX;
-        const y = e.clientY - dragOffsetY;
-        
-        // Keep monitor within window bounds
-        const maxX = window.innerWidth - container.offsetWidth;
-        const maxY = window.innerHeight - container.offsetHeight;
-        
-        container.style.left = Math.max(0, Math.min(x, maxX)) + "px";
-        container.style.top = Math.max(0, Math.min(y, maxY)) + "px";
-        
-        // We're now positioning with left instead of right
-        container.style.right = "auto";
-    });
-    
-    document.addEventListener("mouseup", () => {
-        isDragging = false;
-        
-        // Save position to localStorage
-        if (container.style.left && container.style.top) {
-            localStorage.setItem("amd-gpu-monitor-position", JSON.stringify({
-                left: container.style.left,
-                top: container.style.top
-            }));
-        }
-    });
-    
-    // Load saved position if available
-    const savedPosition = localStorage.getItem("amd-gpu-monitor-position");
-    if (savedPosition) {
-        try {
-            const { left, top } = JSON.parse(savedPosition);
-            container.style.left = left;
-            container.style.top = top;
-            container.style.right = "auto";
-        } catch (e) {
-            // Silently fail and use default position
-        }
-    }
-    
-    // Check if monitor was closed previously
-    if (localStorage.getItem("amd-gpu-monitor-closed") === "true") {
+
+    // Restore closed state
+    const closed = localStorage.getItem("amd-gpu-monitor-closed");
+    if (closed === "1") {
         container.style.display = "none";
     }
-    
-    // Add a button to show the monitor again
+
+    // Show button to reopen if closed
     const showButton = document.createElement("button");
     showButton.textContent = "Show AMD GPU Monitor";
-    showButton.style.position = "fixed";
+    showButton.style.position = "absolute";
     showButton.style.top = "5px";
     showButton.style.right = "5px";
-    showButton.style.zIndex = "999";
-    showButton.style.padding = "5px";
-    showButton.style.borderRadius = "3px";
-    showButton.style.backgroundColor = "#333";
-    showButton.style.color = "#fff";
-    showButton.style.border = "none";
-    showButton.style.fontSize = "12px";
-    showButton.style.cursor = "pointer";
+    showButton.style.zIndex = "1000";
     showButton.style.display = "none";
-    
     showButton.addEventListener("click", () => {
-        container.style.display = "block";
+        container.style.display = "";
         showButton.style.display = "none";
         localStorage.removeItem("amd-gpu-monitor-closed");
     });
@@ -304,7 +308,7 @@ const createMonitorElement = () => {
     // Initial visibility check
     updateShowButtonVisibility();
     
-    return { container, gpuBar, gpuText, vramBar, vramText, tempBar, tempText };
+    return { container, gpuBar, gpuText, vramBar, vramText, tempBar, tempText, cpuBar, cpuText, ramBar, ramText };
 };
 
 // Update the monitor UI with new data
@@ -334,27 +338,13 @@ const updateMonitorUI = (monitor, data) => {
     if (monitor.vramBar && monitor.vramText) {
         const vramPercent = gpu.vram_used_percent || 0;
         const vramUsed = gpu.vram_used || 0;
-        const vramTotal = gpu.vram_total || 1;
-        
+        const vramTotal = gpu.vram_total || 0;
         monitor.vramBar.style.width = `${vramPercent}%`;
+        monitor.vramText.textContent = `${vramPercent}% (${vramUsed}MB / ${vramTotal}MB)`;
         
-        // Format the text to show MB or GB
-        let vramUsedText = vramUsed;
-        let vramTotalText = vramTotal;
-        let unit = 'MB';
-        
-        if (vramTotal >= 1024) {
-            vramUsedText = (vramUsed / 1024).toFixed(1);
-            vramTotalText = (vramTotal / 1024).toFixed(1);
-            unit = 'GB';
-        }
-        
-        monitor.vramText.textContent = `${vramUsedText}${unit} / ${vramTotalText}${unit} (${vramPercent}%)`;
-        
-        // Change color based on VRAM usage
-        if (vramPercent > 85) {
+        if (vramPercent > 90) {
             monitor.vramBar.style.backgroundColor = '#ff4d4d';  // Red for high
-        } else if (vramPercent > 70) {
+        } else if (vramPercent > 60) {
             monitor.vramBar.style.backgroundColor = '#ffad33';  // Orange for medium
         } else {
             monitor.vramBar.style.backgroundColor = '#47a0ff';  // Blue for low
@@ -377,6 +367,36 @@ const updateMonitorUI = (monitor, data) => {
             monitor.tempBar.style.backgroundColor = '#ffad33';  // Orange for medium
         } else {
             monitor.tempBar.style.backgroundColor = '#47a0ff';  // Blue for low
+        }
+    }
+
+    // Update CPU utilization (from server)
+    if (monitor.cpuBar && monitor.cpuText && data.cpu_utilization !== undefined) {
+        const cpu = data.cpu_utilization || 0;
+        monitor.cpuBar.style.width = `${cpu}%`;
+        monitor.cpuText.textContent = `${cpu}%`;
+        if (cpu > 80) {
+            monitor.cpuBar.style.backgroundColor = '#ff4d4d';
+        } else if (cpu > 50) {
+            monitor.cpuBar.style.backgroundColor = '#ffad33';
+        } else {
+            monitor.cpuBar.style.backgroundColor = '#47a0ff';
+        }
+    }
+
+    // Update RAM usage (from server; ram_total/ram_used in MB)
+    if (monitor.ramBar && monitor.ramText && data.ram_used_percent !== undefined) {
+        const ramPercent = data.ram_used_percent || 0;
+        const ramUsedMB = data.ram_used || 0;
+        const ramTotalMB = data.ram_total || 0;
+        monitor.ramBar.style.width = `${ramPercent}%`;
+        monitor.ramText.textContent = `${ramPercent}% (${ramUsedMB}MB / ${ramTotalMB}MB)`;
+        if (ramPercent > 90) {
+            monitor.ramBar.style.backgroundColor = '#ff4d4d';
+        } else if (ramPercent > 70) {
+            monitor.ramBar.style.backgroundColor = '#ffad33';
+        } else {
+            monitor.ramBar.style.backgroundColor = '#47a0ff';
         }
     }
 };
