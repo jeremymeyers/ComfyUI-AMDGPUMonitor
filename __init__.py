@@ -7,6 +7,12 @@ import threading
 import asyncio
 from server import PromptServer
 
+# Optional dependency: psutil for system metrics (cpu, ram). If not available, we try a /proc fallback.
+try:
+    import psutil
+except Exception:
+    psutil = None
+
 # Global variable to store GPU stats
 gpu_stats = {
     "gpu_utilization": 0,
@@ -74,7 +80,7 @@ def run_rocm_smi_command(rocm_smi_path, *args):
             return result.stdout
     except subprocess.TimeoutExpired:
         return {}
-    except Exception as e:
+    except Exception:
         return {}
 
 def get_gpu_info(rocm_smi_path):
@@ -138,8 +144,94 @@ def get_gpu_info(rocm_smi_path):
     gpu_stats["last_update"] = time.time()
     return gpu_stats
 
+def get_system_info():
+    """
+    Return CPU and RAM stats.
+    - cpu_utilization: integer percent (0-100)
+    - ram_total: total RAM in MB
+    - ram_used: used RAM in MB
+    - ram_used_percent: percent used (int)
+
+    Preferred: use psutil if installed. Otherwise, on Linux try /proc parsing.
+    """
+    stats = {
+        "cpu_utilization": 0,
+        "ram_total": 0,
+        "ram_used": 0,
+        "ram_used_percent": 0
+    }
+
+    # Prefer psutil for accuracy and portability
+    if psutil is not None:
+        try:
+            cpu = psutil.cpu_percent(interval=None)
+            vm = psutil.virtual_memory()
+            stats["cpu_utilization"] = int(cpu)
+            stats["ram_total"] = int(vm.total / (1024 * 1024))
+            # psutil.virtual_memory().used sometimes equals total - available
+            stats["ram_used"] = int((vm.total - vm.available) / (1024 * 1024))
+            stats["ram_used_percent"] = int(vm.percent)
+            return stats
+        except Exception:
+            # Fall through to fallback parsing
+            pass
+
+    # Fallback: Parse /proc/meminfo and /proc/stat (Linux-only). If not available, return zeros.
+    if os.path.exists("/proc/meminfo"):
+        try:
+            meminfo = {}
+            with open("/proc/meminfo", "r") as f:
+                for line in f:
+                    parts = line.split(":")
+                    if len(parts) < 2:
+                        continue
+                    key = parts[0].strip()
+                    val = parts[1].strip().split()[0]
+                    meminfo[key] = int(val)  # values are in kB
+
+            mem_total_kb = meminfo.get("MemTotal", 0)
+            mem_available_kb = meminfo.get("MemAvailable", None)
+            if mem_available_kb is None:
+                # Older kernels: estimate available as free + buffers + cached
+                mem_available_kb = meminfo.get("MemFree", 0) + meminfo.get("Buffers", 0) + meminfo.get("Cached", 0)
+
+            mem_used_kb = mem_total_kb - mem_available_kb
+            stats["ram_total"] = int(mem_total_kb / 1024)
+            stats["ram_used"] = int(mem_used_kb / 1024)
+            stats["ram_used_percent"] = int((mem_used_kb / mem_total_kb) * 100) if mem_total_kb > 0 else 0
+        except Exception:
+            pass
+
+    # CPU percent fallback: try /proc/stat (compute since boot is complex). We'll try a simple approach:
+    # read two samples quickly and compute percent busy between them.
+    try:
+        def read_cpu_stat():
+            with open("/proc/stat", "r") as f:
+                line = f.readline()
+            parts = line.split()
+            # parts[0] is 'cpu'. The rest are user,nice,system,idle,...
+            nums = [int(p) for p in parts[1:]]
+            total = sum(nums)
+            idle = nums[3] if len(nums) > 3 else 0
+            return total, idle
+
+        t1, i1 = read_cpu_stat()
+        time.sleep(0.05)
+        t2, i2 = read_cpu_stat()
+        total_delta = t2 - t1
+        idle_delta = i2 - i1
+        if total_delta > 0:
+            cpu_usage = (1.0 - (idle_delta / total_delta)) * 100.0
+            stats["cpu_utilization"] = int(max(0, min(100, cpu_usage)))
+    except Exception:
+        pass
+
+    return stats
+
 def send_monitor_update():
-    """Format and send monitor update data"""
+    """Format and send monitor update data (GPU info + system info)."""
+    system_info = get_system_info()
+
     data = {
         'device_type': 'rocm',
         'gpus': [{
@@ -148,9 +240,14 @@ def send_monitor_update():
             'vram_total': gpu_stats['vram_total'],
             'vram_used': gpu_stats['vram_used'],
             'vram_used_percent': gpu_stats['vram_used_percent']
-        }]
+        }],
+        # Add CPU / RAM fields (RAM values are in MB)
+        'cpu_utilization': system_info.get('cpu_utilization', 0),
+        'ram_total': system_info.get('ram_total', 0),
+        'ram_used': system_info.get('ram_used', 0),
+        'ram_used_percent': system_info.get('ram_used_percent', 0),
     }
-    
+
     # Send the data
     try:
         PromptServer.instance.send_sync('amd_gpu_monitor', data)
@@ -171,9 +268,10 @@ def monitor_thread_function():
     while not thread_control.is_set():
         try:
             get_gpu_info(rocm_smi_path)
-            # Send update to UI
+            # Send update to UI (now includes CPU/RAM fields)
             send_monitor_update()
-        except:
+        except Exception:
+            # swallow errors to keep thread alive
             pass
         
         # Sleep for the update interval
@@ -234,6 +332,12 @@ class AMDGPUMonitor:
         
         # Return current stats as a string for debugging
         stats = f"GPU: {gpu_stats['gpu_utilization']}% | VRAM: {gpu_stats['vram_used']}MB/{gpu_stats['vram_total']}MB ({gpu_stats['vram_used_percent']}%) | Temp: {gpu_stats['gpu_temperature']}°C"
+        # If system info is available, append CPU/RAM summary (optional)
+        try:
+            sysinfo = get_system_info()
+            stats += f" | CPU: {sysinfo.get('cpu_utilization',0)}% | RAM: {sysinfo.get('ram_used',0)}MB/{sysinfo.get('ram_total',0)}MB ({sysinfo.get('ram_used_percent',0)}%)"
+        except Exception:
+            pass
         return (stats,)
 
 # Register our node when this script is imported
